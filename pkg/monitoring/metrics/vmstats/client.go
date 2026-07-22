@@ -19,11 +19,13 @@ Copyright The KubeVirt Authors.
 package vmstats
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -73,7 +75,8 @@ func (c *VMStatsClient) FetchNodeVMStats(ctx context.Context, podIP string) (map
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, podIP)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("unexpected status %d from %s: %s", resp.StatusCode, podIP, string(respBody))
 	}
 
 	var results map[string]*VMStatsResult
@@ -81,6 +84,50 @@ func (c *VMStatsClient) FetchNodeVMStats(ctx context.Context, podIP string) (map
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 	return results, nil
+}
+
+type enableVMStatsRequestBody map[string]bool
+
+var defaultEnableBody enableVMStatsRequestBody
+
+func init() {
+	defaultEnableBody = make(enableVMStatsRequestBody, len(defaultQueryParams))
+	for _, p := range defaultQueryParams {
+		defaultEnableBody[p] = true
+	}
+}
+
+func (c *VMStatsClient) EnableVMStats(ctx context.Context, podIP, namespace, name string) error {
+	baseURL := c.baseURLOverride
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("https://%s:%d", podIP, c.port)
+	}
+	url := fmt.Sprintf("%s/v1/namespaces/%s/virtualmachineinstances/%s/vmstats/enable", baseURL, namespace, name)
+
+	body, err := json.Marshal(defaultEnableBody)
+	if err != nil {
+		return fmt.Errorf("marshaling enable request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("building enable request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("enable HTTP request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("enable returned status %d for %s/%s on %s: %s",
+			resp.StatusCode, namespace, name, podIP, string(respBody))
+	}
+
+	return nil
 }
 
 func buildQueryString(params []string) string {

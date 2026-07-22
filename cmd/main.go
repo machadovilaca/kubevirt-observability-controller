@@ -31,6 +31,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -433,7 +435,7 @@ func setupVMStats(
 		var stores *metrics.Stores
 		for {
 			stores = metrics.GetStores()
-			if stores != nil && stores.VMI != nil && stores.VirtHandlerPod != nil {
+			if stores != nil && stores.VMI != nil && stores.VirtHandlerPod != nil && stores.VMIInformer != nil {
 				break
 			}
 			setupLog.Info("waiting for metrics stores to be initialized")
@@ -444,6 +446,7 @@ func setupVMStats(
 			}
 		}
 
+		enabler := vmstats.NewVMStatsEnabler(vmStatsClient, stores.VirtHandlerPod, stores.VMIInformer)
 		poller := vmstats.NewPoller(
 			vmstats.PollerConfig{
 				PollInterval:  30 * time.Second,
@@ -455,7 +458,11 @@ func setupVMStats(
 			stores.VMI,
 			stores.VirtHandlerPod,
 		)
-		return poller.Start(ctx)
+
+		g, gCtx := errgroup.WithContext(ctx)
+		g.Go(func() error { return enabler.Start(gCtx) })
+		g.Go(func() error { return poller.Start(gCtx) })
+		return g.Wait()
 	})); err != nil {
 		setupLog.Error(err, "unable to add vmstats poller")
 		os.Exit(1)

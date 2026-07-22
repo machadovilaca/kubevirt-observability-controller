@@ -123,6 +123,60 @@ var _ = Describe("VMStatsClient", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
+	Describe("EnableVMStats", func() {
+		It("should send PUT request with correct path and body", func() {
+			var receivedMethod string
+			var receivedPath string
+			var receivedBody map[string]bool
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				receivedMethod = r.Method
+				receivedPath = r.URL.Path
+				Expect(json.NewDecoder(r.Body).Decode(&receivedBody)).To(Succeed())
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			client := NewVMStatsClient(server.Client(), 0)
+			client.baseURLOverride = server.URL
+
+			err := client.EnableVMStats(context.Background(), "unused", "test-ns", "test-vmi")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(receivedMethod).To(Equal(http.MethodPut))
+			Expect(receivedPath).To(Equal("/v1/namespaces/test-ns/virtualmachineinstances/test-vmi/vmstats/enable"))
+			Expect(receivedBody).To(HaveKey("domainStats"))
+			Expect(receivedBody).To(HaveKey("dirtyRate"))
+			Expect(receivedBody).To(HaveKey("guestGetOsInfo"))
+			Expect(receivedBody).To(HaveKey("guestGetHostName"))
+			Expect(receivedBody).To(HaveKey("guestGetTimezone"))
+			Expect(receivedBody).To(HaveKey("guestGetUsers"))
+			Expect(receivedBody).To(HaveKey("guestGetDiskStats"))
+			Expect(receivedBody).To(HaveKey("guestNetworkGetInterfaces"))
+		})
+
+		It("should return error on non-200 response", func() {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+			}))
+			defer server.Close()
+
+			client := NewVMStatsClient(server.Client(), 0)
+			client.baseURLOverride = server.URL
+
+			err := client.EnableVMStats(context.Background(), "unused", "test-ns", "test-vmi")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("403"))
+		})
+
+		It("should return error on network failure", func() {
+			client := NewVMStatsClient(&http.Client{}, 0)
+			client.baseURLOverride = "http://127.0.0.1:1"
+
+			err := client.EnableVMStats(context.Background(), "unused", "ns", "name")
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
 	Describe("NewTLSConfigFromCA", func() {
 		It("should return error for invalid CA data", func() {
 			_, err := NewTLSConfigFromCA([]byte("not a cert"))

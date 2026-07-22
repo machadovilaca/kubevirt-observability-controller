@@ -111,6 +111,11 @@ func SetupInformers(ctx context.Context, c ctrlcache.Cache) error {
 		return fmt.Errorf("pod: %w", err)
 	}
 
+	vmiInformer, ok := vmi.(toolscache.SharedInformer)
+	if !ok {
+		return fmt.Errorf("VMI informer does not implement SharedInformer")
+	}
+
 	SetStores(
 		&Stores{
 			VM:                  vm.GetStore(),
@@ -122,6 +127,7 @@ func SetupInformers(ctx context.Context, c ctrlcache.Cache) error {
 			ClusterPreference:   clusterPreference.GetStore(),
 			ControllerRevision:  controllerRevision.GetStore(),
 			VirtHandlerPod:      pod.GetStore(),
+			VMIInformer:         vmiInformer,
 		},
 		&Indexers{
 			VMIMigration: vmim.GetIndexer(),
