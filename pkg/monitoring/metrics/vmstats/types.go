@@ -47,6 +47,7 @@ type VMStats struct {
 	GuestNetworkGetRoute      string      `json:"GuestNetworkGetRoute"`
 	GuestNetworkGetInterfaces string      `json:"GuestNetworkGetInterfaces"`
 	GuestGetMemoryBlocks      string      `json:"GuestGetMemoryBlocks"`
+	GuestGetDevices           string      `json:"GuestGetDevices"`
 }
 
 type DomainStats struct {

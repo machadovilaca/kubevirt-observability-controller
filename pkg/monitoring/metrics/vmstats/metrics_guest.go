@@ -29,7 +29,7 @@ var (
 	guestMetricsList = []operatormetrics.Metric{
 		guestOsInfo, guestHostname, guestTimezone,
 		guestUserCount, guestDiskTotalBytes, guestDiskUsedBytes,
-		guestInterfaceInfo,
+		guestInterfaceInfo, guestDeviceDriverDate,
 	}
 
 	guestOsInfo = operatormetrics.NewGauge(operatormetrics.MetricOpts{
@@ -60,6 +60,11 @@ var (
 		Name: "kubevirt_vmi_guest_interface_info",
 		Help: "Guest network interface information from the guest agent.",
 	})
+	guestDeviceDriverDate = operatormetrics.NewGauge(operatormetrics.MetricOpts{
+		Name: "kubevirt_vmi_guest_device_driver_date_seconds",
+		Help: "Release date of the driver of a guest device, in seconds since the epoch, " +
+			"as reported by the guest agent.",
+	})
 )
 
 func collectGuestMetrics(report *VMIReport) []operatormetrics.CollectorResult {
@@ -70,6 +75,7 @@ func collectGuestMetrics(report *VMIReport) []operatormetrics.CollectorResult {
 	crs = append(crs, collectGuestUsers(report)...)
 	crs = append(crs, collectGuestDiskStats(report)...)
 	crs = append(crs, collectGuestInterfaces(report)...)
+	crs = append(crs, collectGuestDevices(report)...)
 	return crs
 }
 
@@ -201,4 +207,71 @@ func collectGuestInterfaces(report *VMIReport) []operatormetrics.CollectorResult
 		}))
 	}
 	return crs
+}
+
+func collectGuestDevices(report *VMIReport) []operatormetrics.CollectorResult {
+	if report.Stats.GuestGetDevices == "" {
+		return nil
+	}
+
+	var devices []struct {
+		DriverName    string `json:"driver-name"`
+		DriverDate    *int64 `json:"driver-date"`
+		DriverVersion string `json:"driver-version"`
+		ID            *struct {
+			Type     string `json:"type"`
+			VendorID *int64 `json:"vendor-id"`
+			DeviceID *int64 `json:"device-id"`
+		} `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(report.Stats.GuestGetDevices), &devices); err != nil {
+		return nil
+	}
+
+	var crs []operatormetrics.CollectorResult
+	seen := make(map[deviceKey]struct{}, len(devices))
+	for _, d := range devices {
+		if d.DriverDate == nil {
+			continue
+		}
+		key := deviceKey{name: d.DriverName, version: d.DriverVersion}
+		if d.ID != nil {
+			key.devType = d.ID.Type
+			key.vendorID = formatPCIID(d.ID.VendorID)
+			key.deviceID = formatPCIID(d.ID.DeviceID)
+		}
+		// Guests report the same device more than once (one entry per driver binding), which
+		// would be a duplicate time series. Prometheus fails the whole scrape on those, so only
+		// the first entry of each distinct device is reported.
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		crs = append(crs, report.newCollectorResultWithLabels(
+			guestDeviceDriverDate, float64(*d.DriverDate)/nanosecondsPerSecond, map[string]string{
+				"driver_name":    key.name,
+				"driver_version": key.version,
+				"device_type":    key.devType,
+				"vendor_id":      key.vendorID,
+				"device_id":      key.deviceID,
+			}))
+	}
+	return crs
+}
+
+// deviceKey is the full label set of a guest device metric, used to drop duplicate series.
+type deviceKey struct {
+	name     string
+	version  string
+	devType  string
+	vendorID string
+	deviceID string
+}
+
+func formatPCIID(id *int64) string {
+	if id == nil {
+		return ""
+	}
+	return fmt.Sprintf("0x%04x", *id)
 }

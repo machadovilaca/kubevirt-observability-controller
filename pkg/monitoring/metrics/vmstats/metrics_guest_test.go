@@ -88,6 +88,100 @@ var _ = Describe("Guest Metrics", func() {
 		Expect(found).To(BeTrue())
 	})
 
+	It("should parse GuestGetDevices", func() {
+		report.Stats.GuestGetDevices = `[
+		 {"driver-date":1651363200000000000,"driver-name":"Red Hat VirtIO SCSI controller","driver-version":"100.85.104.20800","id":{"device-id":4162,"vendor-id":6900,"type":"pci"}}
+		]`
+
+		results := collectGuestDevices(report)
+
+		Expect(results).To(HaveLen(1))
+		Expect(results[0].Value).To(Equal(1651363200.0))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("driver_name", "Red Hat VirtIO SCSI controller"))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("driver_version", "100.85.104.20800"))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("device_type", "pci"))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("vendor_id", "0x1af4"))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("device_id", "0x1042"))
+	})
+
+	It("should emit empty labels for optional GuestGetDevices fields", func() {
+		report.Stats.GuestGetDevices = `[
+		 {"driver-date":1736726400000000000,"driver-name":"VirtIO Balloon Driver"}
+		]`
+
+		results := collectGuestDevices(report)
+
+		Expect(results).To(HaveLen(1))
+		Expect(results[0].Value).To(Equal(1736726400.0))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("driver_name", "VirtIO Balloon Driver"))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("driver_version", ""))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("device_type", ""))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("vendor_id", ""))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("device_id", ""))
+	})
+
+	It("should not emit duplicate series for devices reported twice", func() {
+		report.Stats.GuestGetDevices = `[
+		 {"driver-date":1771372800000000000,"driver-name":"Red Hat VirtIO SCSI controller","driver-version":"100.103.104.29700","id":{"device-id":4162,"vendor-id":6900,"type":"pci"}},
+		 {"driver-date":1768953600000000000,"driver-name":"Red Hat VirtIO SCSI pass-through controller","driver-version":"100.102.104.29500","id":{"device-id":4168,"vendor-id":6900,"type":"pci"}},
+		 {"driver-date":1771372800000000000,"driver-name":"Red Hat VirtIO SCSI controller","driver-version":"100.103.104.29700","id":{"device-id":4162,"vendor-id":6900,"type":"pci"}}
+		]`
+
+		results := collectGuestDevices(report)
+
+		Expect(results).To(HaveLen(2), "the repeated SCSI controller should be reported once")
+
+		Expect(results[0].Value).To(Equal(1771372800.0))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("driver_name", "Red Hat VirtIO SCSI controller"))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("device_id", "0x1042"))
+
+		Expect(results[1].Value).To(Equal(1768953600.0))
+		Expect(results[1].ConstLabels).To(HaveKeyWithValue("driver_name", "Red Hat VirtIO SCSI pass-through controller"))
+		Expect(results[1].ConstLabels).To(HaveKeyWithValue("device_id", "0x1048"))
+	})
+
+	It("should keep distinct devices that differ only by device id", func() {
+		report.Stats.GuestGetDevices = `[
+		 {"driver-date":1771372800000000000,"driver-name":"Red Hat VirtIO SCSI controller","driver-version":"100.103.104.29700","id":{"device-id":4100,"vendor-id":6900,"type":"pci"}},
+		 {"driver-date":1771372800000000000,"driver-name":"Red Hat VirtIO SCSI controller","driver-version":"100.103.104.29700","id":{"device-id":4162,"vendor-id":6900,"type":"pci"}}
+		]`
+
+		Expect(collectGuestDevices(report)).To(HaveLen(2))
+	})
+
+	It("should not drop every device when a PCI ID exceeds uint16", func() {
+		report.Stats.GuestGetDevices = `[
+		 {"driver-date":1749427200000000000,"driver-name":"Red Hat VirtIO Ethernet Adapter","driver-version":"100.101.104.28200","id":{"device-id":4161,"vendor-id":70000,"type":"pci"}},
+		 {"driver-date":1736726400000000000,"driver-name":"VirtIO Balloon Driver","driver-version":"100.100.104.27100","id":{"device-id":4165,"vendor-id":6900,"type":"pci"}}
+		]`
+
+		results := collectGuestDevices(report)
+
+		Expect(results).To(HaveLen(2))
+		Expect(results[0].ConstLabels).To(HaveKeyWithValue("driver_name", "Red Hat VirtIO Ethernet Adapter"))
+		Expect(results[1].ConstLabels).To(HaveKeyWithValue("driver_name", "VirtIO Balloon Driver"))
+	})
+
+	It("should skip devices without a driver date", func() {
+		report.Stats.GuestGetDevices = `[
+		 {"driver-name":"VirtIO Input Driver","driver-version":"100.100.104.27100","id":{"device-id":4178,"vendor-id":6900,"type":"pci"}}
+		]`
+
+		Expect(collectGuestDevices(report)).To(BeEmpty())
+	})
+
+	It("should include GuestGetDevices in the collected guest metrics", func() {
+		report.Stats.GuestGetDevices = `[
+		 {"driver-date":1736726400000000000,"driver-name":"VirtIO Serial Driver","driver-version":"100.100.104.27100","id":{"device-id":4163,"vendor-id":6900,"type":"pci"}}
+		]`
+
+		var names []string
+		for _, r := range collectGuestMetrics(report) {
+			names = append(names, r.Metric.GetOpts().Name)
+		}
+		Expect(names).To(ContainElement("kubevirt_vmi_guest_device_driver_date_seconds"))
+	})
+
 	It("should skip malformed JSON gracefully", func() {
 		report.Stats.GuestGetOsInfo = `{invalid json`
 		results := collectGuestMetrics(report)
