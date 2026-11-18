@@ -166,6 +166,26 @@ The controller automatically reconciles the following resources in its own names
 
 These resources are created on startup and continuously reconciled. If deleted or modified, the controller restores them to the desired state.
 
+### The metrics Service selector
+
+The Service has to select the controller's own pods. By default it selects
+`app.kubernetes.io/name=virt-observability-controller`, which is the label
+`config/manager/manager.yaml` puts on the pod template.
+
+A deployer that labels the pods differently would otherwise get a Service with
+no endpoints, no scrape target and no error anywhere, so the controller reads
+its own pod at startup (`POD_NAME` downward API env var) and checks the label
+is really there. If it is not, the selector is derived from that pod's labels
+instead, minus `pod-template-hash`, and the controller logs:
+
+```
+the metrics Service may not select the controller pods
+```
+
+Keep the `app.kubernetes.io/name` label on the pod template to stay on the
+default path. If you drop `POD_NAME`, the controller cannot run the check and
+falls back to the default selector, so the label becomes mandatory.
+
 ### Scrape authorization
 
 With `--metrics-secure` on (the default), the metrics endpoint runs a

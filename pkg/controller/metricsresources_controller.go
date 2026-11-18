@@ -55,6 +55,7 @@ type MetricsResourcesReconciler struct {
 	ServiceAccountName string
 	MetricsPort        int32
 	SecureMetrics      bool
+	PodSelector        map[string]string
 }
 
 func (r *MetricsResourcesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -164,11 +165,16 @@ func (r *MetricsResourcesReconciler) buildDesiredService() *corev1.Service {
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},
-			Selector: map[string]string{
-				labelKeyName: controllerName,
-			},
+			Selector: r.podSelector(),
 		},
 	}
+}
+
+func (r *MetricsResourcesReconciler) podSelector() map[string]string {
+	if len(r.PodSelector) > 0 {
+		return r.PodSelector
+	}
+	return DefaultMetricsSelector()
 }
 
 func (r *MetricsResourcesReconciler) buildDesiredSecret() *corev1.Secret {

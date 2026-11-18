@@ -368,6 +368,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	podSelector, err := controller.ResolveMetricsSelector(
+		context.Background(), mgr.GetAPIReader(), podNamespace, os.Getenv("POD_NAME"))
+	if err != nil {
+		setupLog.Error(err, "the metrics Service may not select the controller pods",
+			"selector", podSelector)
+	}
+
 	if err := (&controller.MetricsResourcesReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
@@ -375,6 +382,7 @@ func main() {
 		ServiceAccountName: serviceAccountName,
 		MetricsPort:        metricsPort,
 		SecureMetrics:      secureMetrics,
+		PodSelector:        podSelector,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MetricsResources")
 		os.Exit(1)

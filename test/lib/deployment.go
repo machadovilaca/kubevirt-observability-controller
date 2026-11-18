@@ -169,6 +169,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         - name: POD_SERVICE_ACCOUNT
           valueFrom:
             fieldRef:
