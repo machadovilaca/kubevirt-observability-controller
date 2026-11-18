@@ -14,5 +14,10 @@ rules:
   - kubevirt-guest-device-drivers-config
   verbs:
   - get
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
   - list
   - watch
