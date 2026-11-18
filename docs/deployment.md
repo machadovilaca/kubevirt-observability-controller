@@ -166,6 +166,23 @@ The controller automatically reconciles the following resources in its own names
 
 These resources are created on startup and continuously reconciled. If deleted or modified, the controller restores them to the desired state.
 
+### Scrape authorization
+
+With `--metrics-secure` on (the default), the metrics endpoint runs a
+SubjectAccessReview for a `get` on the `/metrics` non-resource URL. The
+ServiceMonitor authenticates with a token for the controller's **own**
+ServiceAccount, so that account is the identity being authorized, and it
+needs the permission itself or every scrape is answered with 403.
+
+`config/rbac` grants it with two pieces:
+
+- `metrics_auth_role.yaml` — lets the controller create TokenReviews and SubjectAccessReviews, so it can run the check
+- `metrics_reader_role.yaml` plus `metrics_reader_role_binding.yaml` — the `get /metrics` permission, bound to the controller ServiceAccount
+
+Both bindings are part of the default overlay. A deployment that builds its
+own RBAC rather than applying `config/rbac` has to grant the same `get` on
+`/metrics` to whichever ServiceAccount the ServiceMonitor authenticates as.
+
 ## 6. Verify the deployment
 
 Check the controller pods are running:
@@ -179,6 +196,16 @@ Check the self-managed Service was created:
 ```bash
 kubectl get svc -n kubevirt virt-observability-controller-metrics
 ```
+
+Check the ServiceAccount Prometheus authenticates as is allowed to scrape:
+
+```bash
+kubectl auth can-i get /metrics \
+  --as=system:serviceaccount:kubevirt:virt-observability-controller-controller-manager
+```
+
+A `no` here means the `metrics-reader` binding is missing and every scrape
+will return 403.
 
 Check the controller logs:
 
