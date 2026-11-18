@@ -31,7 +31,16 @@ make docker-build docker-push IMG=$IMG CONTAINER_TOOL=podman
 make deploy IMG=$IMG
 ```
 
-This runs `kustomize build config/default` and applies it. It creates all RBAC resources, the ServiceAccount, and the Deployment with a `virt-observability-controller-` name prefix in the `virt-observability-controller-system` namespace.
+This runs `kustomize build config/default` and applies it. It creates all RBAC resources, the ServiceAccount, and the Deployment with a `virt-observability-controller-` name prefix in the `kubevirt` namespace.
+
+The overlay does not create that namespace — KubeVirt already owns it, and the
+controller has to live there to mount the virt-handler monitoring client
+certificate (see [VMStats feature gate](#vmstats-feature-gate)). If KubeVirt
+is installed somewhere else, retarget the overlay:
+
+```bash
+cd config/default && kustomize edit set namespace <kubevirt-namespace>
+```
 
 ### Option B: Static manifest
 
@@ -162,30 +171,30 @@ These resources are created on startup and continuously reconciled. If deleted o
 Check the controller pods are running:
 
 ```bash
-kubectl get pods -n virt-observability-controller-system
+kubectl get pods -n kubevirt
 ```
 
 Check the self-managed Service was created:
 
 ```bash
-kubectl get svc -n virt-observability-controller-system virt-observability-controller-metrics
+kubectl get svc -n kubevirt virt-observability-controller-metrics
 ```
 
 Check the controller logs:
 
 ```bash
-kubectl logs -n virt-observability-controller-system deploy/virt-observability-controller-controller-manager
+kubectl logs -n kubevirt deploy/virt-observability-controller-controller-manager
 ```
 
 Port-forward and query metrics:
 
 ```bash
-kubectl port-forward -n virt-observability-controller-system svc/virt-observability-controller-metrics 8443:8443
+kubectl port-forward -n kubevirt svc/virt-observability-controller-metrics 8443:8443
 ```
 
 ```bash
 TOKEN=$(kubectl get secret virt-observability-controller-metrics-token \
-  -n virt-observability-controller-system \
+  -n kubevirt \
   -o jsonpath='{.data.token}' | base64 -d)
 
 curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8443/metrics | grep ^kubevirt_ | sort

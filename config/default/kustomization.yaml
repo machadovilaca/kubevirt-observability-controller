@@ -1,4 +1,6 @@
 
+namespace: kubevirt
+
 namePrefix: virt-observability-controller-
 
 resources:
